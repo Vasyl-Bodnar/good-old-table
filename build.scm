@@ -6,13 +6,12 @@
 (add-to-load-path ".")
 (use-modules (buildlib))
 
-(disable-default-failure)
-
-(configure #:exe-name "zzz-example")
+(configure #:c-compiler "tcc" #:exe-name "got-test" #:lib-source-dir "src/lib" #:lib-name "libgot" #:lib-type 'both)
 
 (compile-c)
 
-;;(install) We do not want to install an example
+(install (memq #t (map (lambda (x) (equal? "install" x))
+                       (command-line))))
 
 (clean (memq #t (map (lambda (x) (equal? "clean" x))
                      (command-line))))
