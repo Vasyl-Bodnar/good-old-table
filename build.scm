@@ -6,7 +6,7 @@
 (add-to-load-path ".")
 (use-modules (buildlib))
 
-(configure #:c-compiler "tcc" #:exe-name "got-test" #:lib-source-dir "src/lib" #:lib-name "libgot" #:lib-type 'both)
+(configure #:c-compiler "tcc" #:exe-name "got-test") ;;#:lib-source-dir "src/lib" #:lib-name "libgot" #:lib-type 'both)
 
 (compile-c)
 

@@ -322,7 +322,10 @@
               (check-objs lib-objs))
             (info "Already compiled"))
         (if (check-fail) (link-lib (map caddr lib-objs))))
-      (if (check-fail) (hash-inputs (delete-duplicates (append exe-objs lib-objs))))))
+      (if (and (check-fail)
+               (not (nil? lib-objs))
+               (not (equal? exe-objs lib-objs)))
+          (hash-inputs (delete-duplicates (append exe-objs lib-objs))))))
   (return-fail))
 
 (define* (install #:optional (conditional #t) #:key (prefix "/usr/local"))
