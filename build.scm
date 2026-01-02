@@ -14,6 +14,11 @@
 
 (compile-c)
 
+(configure #:lib-source-dir "src/lib" #:lib-name "libdgot" #:lib-type 'both
+           #:derive '(DYNAMIC_TABLE))
+
+(compile-c)
+
 (install (memq #t (map (lambda (x) (equal? "install" x))
                        (command-line))))
 

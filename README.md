@@ -2,7 +2,9 @@
 A fine hash table in C.
 
 Supports get, put, delete on elements, as well as iteration. 
+
 Base version allows you to provide your own allocated memory for creation and resizing.
+
 Dynamic version uses malloc wrappers and handles memory for you.
 
 ## Usage
@@ -41,7 +43,7 @@ while ((entry = next_elem_ht(new_ht, &idx)).key) {
 clear_ht(ht); // Now old one is empty, and can be reused
 ```
 
-For dynamic version, simply use `_dht` variants, note that put will require a double pointer to the table in order to replace it.
+For dynamic version, simply use `_dht` variants, note that `put_elem_dht` will require a double pointer to the table in order to replace it.
 
 ## Build
 Utilizes [build-scm](https://github.com/Vasyl-Bodnar/build-scm). 
@@ -51,6 +53,8 @@ Simply run `./build.scm` or `guile build.scm` at project root.
 The libraries are in the generated `build` folder
 
 You can also just copy `got.c` and `got.h` for your own uses.
+
+Note that dynamic version is under the define `DYNAMIC_TABLE`
 
 ## License
 The library is licensed under MPL version 2.0.

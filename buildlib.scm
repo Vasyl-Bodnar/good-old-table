@@ -8,7 +8,7 @@
   #:autoload (ice-9 binary-ports) (get-bytevector-all put-bytevector put-u8)
   #:autoload (ice-9 textual-ports) (get-line get-string-all)
   #:autoload (ice-9 popen) (open-pipe*)
-  #:autoload (srfi srfi-1) (delete-duplicates)
+  #:autoload (srfi srfi-1) (delete-duplicates lset<=)
   #:export (configure compile-c install clean disable-default-failure))
 
 (define *c-compiler* #f)
@@ -103,7 +103,7 @@
 (define* (configure #:optional (conditional #t) #:key (c-compiler "cc") (c-archiver "ar")
                     (root ".") (exe-name #f) (lib-name exe-name) (lib-type 'none)
                     (source-dir "src") (lib-source-dir source-dir) (build-dir "build") (obj-dir "obj")
-                    (optimization "-O0") (debug "-g") (wall "-Wall"))
+                    (optimization "-O0") (debug "-g") (wall "-Wall") (derive '()))
   (if (not (or exe-name (and lib-name (memq lib-type '(static dynamic both)))))
       (fail "You need to provide a name for at least one of executable or a library with the type (one of 'static, 'dynamic, 'both)")
       (when conditional
@@ -114,7 +114,7 @@
         (set! *lib-source-directory* (string-append *root* fss lib-source-dir))
         (set! *build-directory* (string-append *root* fss build-dir))
         (set! *obj-build-directory* (string-append *build-directory* fss obj-dir))
-        (set! *extra-args* (list optimization debug wall))
+        (set! *extra-args* (append (list optimization debug wall) (map (lambda (der) (string-append "-D" (symbol->string der))) derive)))
         (set! *metadata* (string-append *build-directory* fss ".metadata"))
         (when exe-name
           (set! *executable* (string-append *build-directory* fss exe-name)))
@@ -140,7 +140,8 @@
           (warn "Could not find an object directory named " *obj-build-directory*)
           (info "Creating the obj directory")
           (mkdir *obj-build-directory*))
-        (unless (file-exists? *metadata*)
+        (unless (let ((st (stat *metadata* #f)))
+                  (and st (eq? (stat:type st) 'directory)))
           (warn "Could not find metadata")
           (info "Creating new metadata")
           (mkdir *metadata*))
@@ -322,10 +323,7 @@
               (check-objs lib-objs))
             (info "Already compiled"))
         (if (check-fail) (link-lib (map caddr lib-objs))))
-      (if (and (check-fail)
-               (not (nil? lib-objs))
-               (not (equal? exe-objs lib-objs)))
-          (hash-inputs (delete-duplicates (append exe-objs lib-objs))))))
+      (if (and (check-fail) (not (lset<= equal? lib-objs exe-objs))) (hash-inputs (delete-duplicates (append exe-objs lib-objs))))))
   (return-fail))
 
 (define* (install #:optional (conditional #t) #:key (prefix "/usr/local"))
