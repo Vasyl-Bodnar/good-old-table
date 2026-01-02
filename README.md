@@ -1,7 +1,9 @@
 # good-old-table
 A fine hash table in C.
 
-A work in progress
+Supports get, put, delete on elements, as well as iteration. 
+Base version allows you to provide your own allocated memory for creation and resizing.
+Dynamic version uses malloc wrappers and handles memory for you.
 
 ## Usage
 For the base variant that does not manage memory on its own:
@@ -30,8 +32,16 @@ value = get_elem_ht(new_ht, (uint8_t *)"124");
 if (!value) puts("Did not find any!");
 else printf("Got a string! %s\n", value);
 
-clear_ht(ht); // Now, it is empty, and can be reused
+Entry entry; // Can iterate quite easily using this pattern
+uint64_t idx = 0;
+while ((entry = next_elem_ht(new_ht, &idx)).key) {
+    printf("Entry at %zu: key: %s value: %s\n", idx, entry.key, entry.value);
+}
+
+clear_ht(ht); // Now old one is empty, and can be reused
 ```
+
+For dynamic version, simply use `_dht` variants, note that put will require a double pointer to the table in order to replace it.
 
 ## Build
 Utilizes [build-scm](https://github.com/Vasyl-Bodnar/build-scm). 

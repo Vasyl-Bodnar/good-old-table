@@ -44,7 +44,8 @@ HashTable *create_ht(uint8_t *memory, uint64_t len, uint32_t key_size,
 HashTable *create_from_ht(uint8_t *memory, HashTable *old_ht, uint64_t len);
 
 // Returns 0 on failure, if it is too full.
-// Otherwise 1.
+// If the key did not already exist, returns 1.
+// If the key did exist, the value is replaced, and 2 is returned.
 uint32_t put_elem_ht(HashTable *ht, uint8_t *key, uint8_t *value);
 
 // Returns 0 if failed to find an element with that key.
@@ -65,5 +66,37 @@ Entry next_elem_ht(HashTable *ht, uint64_t *idx);
 
 // Clears the table for reuse
 void clear_ht(HashTable *ht);
+
+#ifdef DYNAMIC_TABLE
+typedef struct DynHashTable {
+    uint32_t key_size;
+    uint32_t val_size;
+    uint64_t length;
+    uint64_t capacity;
+    uint8_t elems[];
+} DynHashTable;
+
+// `create_ht` dynamic variant, mallocs
+DynHashTable *create_dht(uint64_t len, uint32_t key_size, uint32_t val_size);
+
+// `put_elem_ht` dynamic variant, mallocs and frees as necessary.
+uint32_t put_elem_dht(DynHashTable **dht, uint8_t *key, uint8_t *value);
+
+// `get_elem_ht` dynamic variant, identical behaviour.
+uint8_t *get_elem_dht(DynHashTable *dht, uint8_t *key);
+
+// `delete_elem_ht` dynamic variant, identical behaviour.
+// Note that if table expands the tombstones will be deleted completely.
+uint32_t delete_elem_dht(DynHashTable *dht, uint8_t *key);
+
+// `next_elem_dht` dynamic variant, identical behaviour.
+Entry next_elem_dht(DynHashTable *dht, uint64_t *idx);
+
+// `clear_dht` dynamic variant, identical behaviour.
+void clear_dht(DynHashTable *dht);
+
+// Frees malloced table
+void delete_dht(DynHashTable *dht);
+#endif // DYNAMIC_TABLE
 
 #endif // GOT_H_
