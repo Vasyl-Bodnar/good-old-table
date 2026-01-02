@@ -45,6 +45,20 @@ HashTable *create_ht(uint8_t *memory, uint64_t len, uint32_t key_size,
     return ht;
 }
 
+HashTable *create_from_ht(uint8_t *memory, HashTable *old_ht,
+                          uint64_t new_len) {
+    HashTable *new_ht =
+        create_ht(memory, new_len, old_ht->key_size, old_ht->val_size);
+
+    Entry entry;
+    uint64_t idx;
+    while ((entry = next_elem_ht(old_ht, &idx)).key) {
+        put_elem_ht(new_ht, entry.key, entry.value);
+    }
+
+    return new_ht;
+}
+
 uint32_t elem_size(HashTable *ht) { return ht->key_size + ht->val_size; }
 
 void copy_elem(HashTable *ht, uint64_t idx, uint8_t *key, uint8_t *value) {
@@ -117,6 +131,29 @@ uint32_t delete_elem_ht(HashTable *ht, uint8_t *key) {
     }
 
     return 0;
+}
+
+Entry next_elem_ht(HashTable *ht, uint64_t *idx) {
+    if (!idx || *idx >= ht->capacity) {
+        return (Entry){0, 0};
+    }
+
+    uint8_t *control = ht->elems;
+    uint8_t *elem = ht->elems + calc_control_size(ht->capacity);
+
+    // TODO: SIMD versions
+    for (uint64_t i = *idx; i < ht->capacity; i++) {
+        if (control[i] & 1) {
+            *idx = i + 1;
+            return (Entry){
+                elem + i * elem_size(ht),
+                elem + i * elem_size(ht) + ht->key_size,
+            };
+        }
+    }
+
+    *idx = ht->capacity;
+    return (Entry){0, 0};
 }
 
 void clear_ht(HashTable *ht) {
