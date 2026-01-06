@@ -3,13 +3,13 @@
 ;; file, You can obtain one at http://mozilla.org/MPL/2.0/.
 (define-module (buildlib)
   #:autoload (ice-9 optargs) (define*)
-  #:autoload (ice-9 ftw) (nftw)
+  #:autoload (ice-9 ftw) (nftw scandir)
   #:autoload (ice-9 threads) (par-map n-par-map)
   #:autoload (ice-9 binary-ports) (get-bytevector-all put-bytevector put-u8)
   #:autoload (ice-9 textual-ports) (get-line get-string-all)
   #:autoload (ice-9 popen) (open-pipe*)
   #:autoload (srfi srfi-1) (delete-duplicates lset<=)
-  #:export (configure compile-c install clean disable-default-failure))
+  #:export (cache configure compile-c install clean disable-default-failure))
 
 (define *c-compiler* #f)
 (define *c-archiver* #f)
@@ -22,6 +22,10 @@
 (define *library-type* #f)
 (define *extra-args* #f)
 
+(define *cache* #t)
+(define *keep-configs* 3)
+
+(define *verbosity* 3)
 (define *root* #f)
 (define *metadata* #f)
 (define *compiler-info-hash* #f)
@@ -35,18 +39,21 @@
 (define *fatal-fail* #t)
 
 (define (info . strs)
-  (display (apply string-append strs))
-  (newline)
+  (when (= *verbosity* 3)
+    (display (apply string-append strs))
+    (newline))
   #t)
 
 (define (warn . strs)
-  (display (apply string-append (cons "WARNING: " strs)))
-  (newline)
+  (when (>= *verbosity* 2)
+    (display (apply string-append (cons "WARNING: " strs)))
+    (newline))
   #t)
 
 (define (fail . strs)
-  (display (apply string-append (cons "FAILURE: " strs)))
-  (newline)
+  (when (>= *verbosity* 0)
+    (display (apply string-append (cons "FAILURE: " strs)))
+    (newline))
   (if (eq? *fatal-fail* 'ok)
       (set! *fatal-fail* 'fail)
       (if *fatal-fail* (set! *fatal-fail* #f)))
@@ -73,7 +80,7 @@
     (close-port port)
     hash))
 
-;; This works, but is rather fragile
+;; FIX: This works, but is rather fragile
 (define (hash-port port)
   (let* ((tmp-port (mkstemp "/tmp/build-XXXXXX"))
          (bv (get-bytevector-all port)))
@@ -99,9 +106,18 @@
       (close-input-port port)
       hash)))
 
+(define (verbosity level)
+  (set! *verbosity* (if (> level 3) 3 level)))
+
+(define* (cache #:optional (conditional #t) #:key (enable #t) (keep-configs 3))
+  (when conditional
+    (set! *cache* enable)
+    (set! *keep-configs* keep-configs))
+  (return-fail))
+
 ;; lib-type is 'none, 'static, 'dynamic, or 'both
 (define* (configure #:optional (conditional #t) #:key (c-compiler "cc") (c-archiver "ar")
-                    (root ".") (exe-name #f) (lib-name exe-name) (lib-type 'none)
+                    (root ".") (exe-name #f) (lib-name exe-name) (lib-type 'none) (sudo #t)
                     (source-dir "src") (lib-source-dir source-dir) (build-dir "build") (obj-dir "obj")
                     (optimization "-O0") (debug "-g") (wall "-Wall") (derive '()))
   (if (not (or exe-name (and lib-name (memq lib-type '(static dynamic both)))))
@@ -114,8 +130,38 @@
         (set! *lib-source-directory* (string-append *root* fss lib-source-dir))
         (set! *build-directory* (string-append *root* fss build-dir))
         (set! *obj-build-directory* (string-append *build-directory* fss obj-dir))
-        (set! *extra-args* (append (list optimization debug wall) (map (lambda (der) (string-append "-D" (symbol->string der))) derive)))
-        (set! *metadata* (string-append *build-directory* fss ".metadata"))
+        (set! *extra-args* (append (list optimization debug wall)
+                                   (map (lambda (der)
+                                          (string-append "-D" (if (symbol? der)
+                                                                  (symbol->string der) der)))
+                                        derive)))
+        ;; We also need to ensure a few system commands are present, and set them accordingly
+        ;; TODO: Consider adding a proper local hash function implementation instead
+        (let ((hash-command (or (search-path (parse-path (getenv "PATH")) "b2sum")
+                                (search-path (parse-path (getenv "PATH")) "sha512sum")
+                                (search-path (parse-path (getenv "PATH")) "sha256sum")
+                                (search-path (parse-path (getenv "PATH")) "sha1sum")
+                                (search-path (parse-path (getenv "PATH")) "md5sum")))
+              (sudo-command (or (search-path (parse-path (getenv "PATH")) "sudo")
+                                (search-path (parse-path (getenv "PATH")) "doas")))
+              (rmdir-command (search-path (parse-path (getenv "PATH")) "rmdir"))
+              (rm-command (search-path (parse-path (getenv "PATH")) "rm"))
+              (cp-command (search-path (parse-path (getenv "PATH")) "cp")))
+          (when *cache*
+            (if hash-command
+                (set! *hash-command* hash-command)
+                (fail "Could not find a hash command in PATH")))
+          (when sudo
+            (if sudo-command
+                (set! *sudo-command* sudo-command)
+                (warn "Could not find a sudo/doas command in PATH, installing might not be possible")))
+          (if rmdir-command
+              (set! *rmdir-command* rmdir-command)
+              (warn "No rmdir in PATH? Using rm -r"))
+          (unless rm-command
+            (fail "No rm in PATH!?"))
+          (unless cp-command
+            (fail "No cp in PATH!?")))
         (when exe-name
           (set! *executable* (string-append *build-directory* fss exe-name)))
         (unless (equal? lib-type 'none)
@@ -132,49 +178,39 @@
           (fail "Could not find a library source directory named " *lib-source-directory*))
         (unless (let ((st (stat *build-directory* #f)))
                   (and st (eq? (stat:type st) 'directory)))
-          (warn "Could not find a build directory named " *build-directory*)
+          (info "Could not find a build directory named " *build-directory*)
           (info "Creating the build directory")
           (mkdir *build-directory*))
+        (when *cache*
+          (set! *metadata* (string-append *build-directory* fss ".metadata"))
+          (unless (let ((st (stat *metadata* #f)))
+                    (and st (eq? (stat:type st) 'directory)))
+            (info "Could not find metadata named" *metadata*)
+            (info "Creating new metadata")
+            (mkdir *metadata*))
+          (let ((compiler-info-hash (hash-compiler-info)))
+            (if compiler-info-hash
+                (begin
+                  (set! *compiler-info-hash* compiler-info-hash)
+                  (set! *obj-build-directory* (in-vicinity *metadata* *compiler-info-hash*)))
+                (fail "Could not check a c compiler: " *c-compiler*))))
         (unless (let ((st (stat *obj-build-directory* #f)))
                   (and st (eq? (stat:type st) 'directory)))
-          (warn "Could not find an object directory named " *obj-build-directory*)
+          (info "Could not find an object directory named " *obj-build-directory*)
           (info "Creating the obj directory")
-          (mkdir *obj-build-directory*))
-        (unless (let ((st (stat *metadata* #f)))
-                  (and st (eq? (stat:type st) 'directory)))
-          (warn "Could not find metadata")
-          (info "Creating new metadata")
-          (mkdir *metadata*))
-        ;; We also need to ensure a few system commands are present, and set them accordingly
-        ;; TODO: Consider adding a proper local hash function implementation instead
-        (let ((hash-command (or (search-path (parse-path (getenv "PATH")) "b2sum")
-                                (search-path (parse-path (getenv "PATH")) "sha512sum")
-                                (search-path (parse-path (getenv "PATH")) "sha256sum")
-                                (search-path (parse-path (getenv "PATH")) "sha1sum")
-                                (search-path (parse-path (getenv "PATH")) "md5sum")))
-              (sudo-command (or (search-path (parse-path (getenv "PATH")) "sudo")
-                                (search-path (parse-path (getenv "PATH")) "doas")))
-              (rmdir-command (search-path (parse-path (getenv "PATH")) "rmdir"))
-              (rm-command (search-path (parse-path (getenv "PATH")) "rm"))
-              (cp-command (search-path (parse-path (getenv "PATH")) "cp")))
-          (if hash-command
-              (set! *hash-command* hash-command)
-              (fail "Could not find a hash command in PATH"))
-          (if sudo-command
-              (set! *sudo-command* sudo-command)
-              (warn "Could not find a sudo/doas command in PATH, installing might not be possible"))
-          (if rmdir-command
-              (set! *rmdir-command* rmdir-command)
-              (warn "No rmdir in PATH? Using rm -r"))
-          (unless rm-command
-            (fail "No rm in PATH!?"))
-          (unless cp-command
-            (fail "No cp in PATH!?")))
-        (let ((compiler-info-hash (hash-compiler-info)))
-          (if compiler-info-hash
-              (set! *compiler-info-hash* compiler-info-hash)
-              (fail "Could not find a c compiler: " *c-compiler*)))))
+          (mkdir *obj-build-directory*))))
   (return-fail))
+
+(define (hash-c-file source-file)
+  (let* ((port (apply open-pipe* (append (list OPEN_READ *c-compiler* "-E") (cdddr *extra-args*) (list source-file))))
+         (str (get-string-all port)))
+    (close-port port)
+    (if (eof-object? str)
+        (fail "Could not macro expand file " (basename source-file)))
+    (let* ((port (open-input-string str))
+           (hash (hash-port port)))
+      (close-input-port port)
+      hash)))
 
 ;; args is one of
 ;; ('hashed hash obj-filename)
@@ -182,15 +218,34 @@
 (define (handle-hash args)
   (case (car args)
     ((hashed) (cadr args))
-    ((finished) (hash-file (cadr args)))
+    ((finished) (hash-c-file (cadr args)))
     ((unfinished) #f)))
 
 (define (check-cache src obj hashes)
   (if (file-exists? obj)
-      (let* ((file-hash (hash-file src))
+      (let* ((file-hash (hash-c-file src))
              (found (member file-hash hashes)))
         (if found (car found) #f))
       #f))
+
+;; Deletes a flat directory (no subdirectories)
+(define (delete-dir dir)
+  (nftw
+   dir
+   (lambda (filename statinfo flag base level)
+     (when (eq? flag 'regular)
+       (delete-file filename))
+     #t))
+  (system*-fail (lambda (ret) (fail "Could not delete a directory " dir "\nReturned " ret))
+                *rmdir-command* dir))
+
+(define (last-dir configs)
+  (let ((s (sort (map (lambda (f)
+                        (call-with-input-file (in-vicinity (in-vicinity *metadata* f) "metafile")
+                          (lambda (port)
+                            (cons (string->number (get-line port)) (in-vicinity *metadata* f)))))
+                      configs) (lambda (x y) (> (car x) (car y))))))
+    (cdr (car s))))
 
 ;; TODO: While we currently just hash sources directly, we should run gcc -E at least
 ;; Otherwise it will not recompile despite changes to headers
@@ -199,17 +254,23 @@
 ;; ('hashed hash obj-filename)
 ;; ('finished filename obj-filename)
 (define* (hash-inputs objs #:key (num-threads #f))
-  (info "Hashing sources")
-  (let ((hashes (if num-threads
-                    (n-par-map num-threads handle-hash objs)
-                    (par-map handle-hash objs))))
-    (call-with-output-file (string-append *metadata* fss *compiler-info-hash*)
-      (lambda (port)
-        (for-each (lambda (hash)
-                    (when hash
-                      (display hash port)
-                      (newline port)))
-                  hashes)))))
+  (when *cache*
+    (info "Hashing sources")
+    (let ((configs (filter (lambda (f) (and (not (equal? f *compiler-info-hash*)) (not (equal? f ".")) (not (equal? f "..")))) (scandir *metadata*)))
+          (hashes (if num-threads
+                      (n-par-map num-threads handle-hash objs)
+                      (par-map handle-hash objs))))
+      (call-with-output-file (in-vicinity *obj-build-directory* "metafile")
+        (lambda (port)
+          (display (get-internal-real-time) port)
+          (newline port)
+          (for-each (lambda (hash)
+                      (when hash
+                        (display hash port)
+                        (newline port)))
+                    hashes)))
+      (if (>= (length configs) *keep-configs*)
+          (delete-dir (last-dir configs))))))
 
 (define (compile-c-object-file src obj)
   (info "Compiling " (basename src))
@@ -251,17 +312,6 @@
        (apply fail (cdr obj))))
    objs))
 
-(define (find-metadata)
-  (let ((found #f))
-    (nftw
-     *metadata*
-     (lambda (filename statinfo flag base level)
-       (if (and (eq? flag 'regular)
-                (equal? *compiler-info-hash* (basename filename)))
-           (set! found filename))
-       #t))
-    found))
-
 ;; compiled-objs should be alist of obj and hash
 (define* (collect-objs dir hashes #:optional (compiled-objs '()))
   (let ((objs '()))
@@ -272,10 +322,11 @@
          ((regular)
           (unless (equal? (basename filename) (basename filename ".c"))
             (let* ((obj-filename (string-append *obj-build-directory* fss (basename filename ".c") ".o"))
-                   (hash (or (assoc-ref compiled-objs obj-filename)
-                             (if hashes
-                                 (check-cache filename obj-filename hashes)
-                                 #f))))
+                   (hash (and *cache*
+                              (or (assoc-ref compiled-objs obj-filename)
+                                  (if hashes
+                                      (check-cache filename obj-filename hashes)
+                                      #f)))))
               (if hash
                   (begin
                     (info "Already compiled, skipping " (basename filename))
@@ -292,11 +343,10 @@
   (when conditional
     (unless (and *c-compiler* *extra-args*
                  *source-directory* *build-directory*
-                 *obj-build-directory* *metadata*
-                 *compiler-info-hash* *hash-command*)
+                 *obj-build-directory*)
       (fail "Must run (configure) first"))
-    (let* ((metadata (find-metadata))
-           (hashes (if metadata
+    (let* ((metadata (in-vicinity *obj-build-directory* "metafile"))
+           (hashes (if (file-exists? metadata)
                        (reverse (call-with-input-file metadata
                                   (lambda (port)
                                     (do ((hash (get-line port) (get-line port))
@@ -330,13 +380,31 @@
   (when conditional
     (info "Copying to local bin")
     (if *sudo-command*
-        (system*-fail (lambda (ret) (fail "Could not copy the executable\nReturned " ret))
-                      *sudo-command* "cp" *executable* (string-append prefix fss "bin" fss (basename *executable*)))
-        (system*-fail (lambda (ret) (fail "Could not copy the executable\nReturned " ret))
-                      "cp" *executable* (string-append prefix fss "bin" fss (basename *executable*)))))
+        (begin
+          (when *executable*
+            (system*-fail (lambda (ret) (fail "Could not copy the executable\nReturned " ret))
+                          *sudo-command* "cp" *executable* (string-append prefix fss "bin" fss (basename *executable*))))
+          (when *library*
+            (when (memq *library-type* '(static both))
+              (system*-fail (lambda (ret) (fail "Could not copy the static library\nReturned " ret))
+                            *sudo-command* "cp" (string-append *library* ".a") (string-append prefix fss "lib" fss (basename (string-append *library* ".a")))))
+            (when (memq *library-type* '(dynamic both))
+              (system*-fail (lambda (ret) (fail "Could not copy the dynamic library\nReturned " ret))
+                            *sudo-command* "cp" (string-append *library* ".so") (string-append prefix fss "lib" fss (basename (string-append *library* ".so")))))))
+        (begin
+          (when *executable*
+            (system*-fail (lambda (ret) (fail "Could not copy the executable\nReturned " ret))
+                          "cp" *executable* (string-append prefix fss "bin" fss (basename *executable*))))
+          (when *library*
+            (when (memq *library-type* '(static both))
+              (system*-fail (lambda (ret) (fail "Could not copy the static library\nReturned " ret))
+                            "cp" (string-append *library* ".a") (string-append prefix fss "lib" fss (basename (string-append *library* ".a")))))
+            (when (memq *library-type* '(dynamic both))
+              (system*-fail (lambda (ret) (fail "Could not copy the dynamic library\nReturned " ret))
+                            "cp" (string-append *library* ".so") (string-append prefix fss "lib" fss (basename (string-append *library* ".so")))))))))
   (return-fail))
 
-;; This is a careful clean that only targets what it itself may have produced
+;; This is a careful clean that tries to target what it itself may have produced
 ;; If you truly need a nuclear option, it shall be provided
 (define* (clean  #:optional (conditional #t) #:key (nuclear #f))
   (when conditional
@@ -345,23 +413,13 @@
         (system*-fail (lambda (ret) (fail "Could not delete the build directory\nReturned " ret))
                       "rm" "-r" *build-directory*)
         (begin
-          (delete-file *executable*)
-          (delete-file (string-append *library* ".a"))
-          (delete-file (string-append *library* ".so"))
-          (nftw *metadata*
-                (lambda (filename statinfo flag base level)
-                  (when (eq? flag 'regular)
-                    (delete-file filename))
-                  #t))
-          (nftw *obj-build-directory*
-                (lambda (filename statinfo flag base level)
-                  (when (and (eq? flag 'regular) (not (equal? (basename filename) (basename filename ".o"))))
-                    (delete-file filename))
-                  #t))
-          (system*-fail (lambda (ret) (fail "Could not delete the metadata directory\nReturned " ret))
-                        *rmdir-command* *metadata*)
-          (system*-fail (lambda (ret) (fail "Could not delete the obj directory\nReturned " ret))
-                        *rmdir-command* *obj-build-directory*)
-          (system*-fail (lambda (ret) (fail "Could not delete the build directory\nReturned " ret))
-                        *rmdir-command* *build-directory*))))
+          (when (file-exists? (in-vicinity *build-directory* "obj"))
+            (delete-dir (in-vicinity *build-directory* "obj")))
+          (delete-dir *obj-build-directory*)
+          (for-each delete-dir
+                    (map (lambda (f) (in-vicinity *metadata* f))
+                         (filter (lambda (f) (not (or (equal? f ".") (equal? f ".."))))
+                                 (scandir *metadata*))))
+          (delete-dir *metadata*)
+          (delete-dir *build-directory*))))
   (return-fail))

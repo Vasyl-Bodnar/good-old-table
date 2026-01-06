@@ -3,8 +3,6 @@
    file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "got.h"
 
-#define GROUP_SIZE 8
-
 uint64_t power_of_two(uint64_t x) {
     if (x <= 1) {
         return 1;
@@ -19,10 +17,11 @@ uint64_t power_of_two(uint64_t x) {
     return x + 1;
 }
 
-#define calc_control_size(len) (len)
+#define calc_control_size(len) (len + (len % GROUP_SIZE))
 
 #define calc_elems_size(len, key_size, val_size)                               \
-    (len * key_size + len * val_size + len)
+    ((len + (len % GROUP_SIZE)) * (key_size + 1) +                             \
+     (len + (len % GROUP_SIZE)) * val_size)
 
 // Simple hash to use while we don't have a better one
 uint64_t fnv1a_hash(uint8_t *input, uint64_t length) {
@@ -69,7 +68,7 @@ void copy_elem(HashTable *ht, uint64_t idx, uint8_t *key, uint8_t *value) {
 }
 
 uint32_t put_elem_ht(HashTable *ht, uint8_t *key, uint8_t *value) {
-    if (ht->length == ((ht->capacity * 4) / 5))
+    if (ht->length >= ((ht->capacity * 4) / 5))
         return 0;
 
     uint8_t *control = ht->elems;
@@ -80,21 +79,80 @@ uint32_t put_elem_ht(HashTable *ht, uint8_t *key, uint8_t *value) {
     uint64_t lo = keyhash ^ hi;
     hi >>= 56;
 
-    // TODO: SIMD versions
-    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity; i++) {
-        if (!(control[i] & 1)) {
-            control[i] = hi | 1;
-            copy_elem(ht, i, key, value);
-            ht->length += 1;
-            return 1;
-        } else if (!(hi ^ (control[i] ^ 1))) {
-            if (!memcmp(key, elem + i * elem_size(ht), ht->key_size)) {
-                memcpy(elem + i * elem_size(ht) + ht->key_size, value,
+#ifdef __SSE2__
+    __m128i onev = _mm_set1_epi8(1);
+    __m128i hiv = _mm_set1_epi8(hi | 1);
+    uint64_t potential_i = 0;
+    int potential_mask = 0;
+    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity;
+         i += GROUP_SIZE) {
+        __m128i controlv = _mm_loadu_si128((__m128i *)(control + i));
+        int res = _mm_movemask_epi8(_mm_cmpeq_epi8(hiv, controlv));
+        while (res) {
+            uint64_t j = i + __builtin_ctz(res);
+            if (!memcmp(key, elem + j * elem_size(ht), ht->key_size)) {
+                memcpy(elem + j * elem_size(ht) + ht->key_size, value,
                        ht->val_size);
                 return 2;
             }
+            res &= res - 1;
+        }
+
+        if (!potential_mask) {
+            potential_i = i;
+            potential_mask = (~_mm_movemask_epi8(_mm_cmpeq_epi8(
+                                 _mm_and_si128(controlv, onev), onev))) &
+                             0xFFFF;
         }
     }
+
+    // Key not found, so if there are free spots we should add a new entry
+    if (potential_mask) {
+        potential_i += __builtin_ctz(potential_mask);
+        if (potential_i < ht->capacity) {
+            control[potential_i] = hi | 1;
+            copy_elem(ht, potential_i, key, value);
+            ht->length += 1;
+            return 1;
+        }
+    }
+
+#else // SWAR
+    uint64_t onev = 0x0101010101010101ull;
+    uint64_t hiv = onev * (hi | 1);
+    uint64_t potential_i = 0;
+    uint64_t potential_mask = 0;
+    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity;
+         i += GROUP_SIZE) {
+        uint64_t controlv = *(uint64_t *)(control + i);
+        uint64_t res = (((hiv ^ controlv) - onev) & ~(hiv ^ controlv)) &
+                       0x8080808080808080ull;
+        while (res) {
+            uint64_t j = i + (__builtin_ctzll(res) >> 3);
+            if (!memcmp(key, elem + j * elem_size(ht), ht->key_size)) {
+                memcpy(elem + j * elem_size(ht) + ht->key_size, value,
+                       ht->val_size);
+                return 2;
+            }
+            res &= res - 1;
+        }
+
+        if (!potential_mask) {
+            potential_i = i;
+            potential_mask = (onev & (~controlv)) * 0x80;
+        }
+    }
+
+    if (potential_mask) {
+        potential_i += __builtin_ctzll(potential_mask) >> 3;
+        if (potential_i < ht->capacity) {
+            control[potential_i] = hi | 1;
+            copy_elem(ht, potential_i, key, value);
+            ht->length += 1;
+            return 1;
+        }
+    }
+#endif
 
     return 0;
 }

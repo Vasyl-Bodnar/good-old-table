@@ -36,7 +36,8 @@ int main(void) {
 
     ret = delete_elem_ht(ht, (uint8_t *)"123"); // Delete elements
     if (!ret)
-        puts("Did not find any!");
+        puts("Did not find any to delete!");
+
     value = get_elem_ht(ht, (uint8_t *)"123");
     if (!value)
         puts("Did not find any!");
@@ -113,6 +114,5 @@ int main(void) {
                entry.value);
     }
 #endif // DYNAMIC_TABLE
-
     return 0;
 }

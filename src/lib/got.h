@@ -8,14 +8,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Fairly certain this is a default on (x86) 64 bit systems anyway
+#ifdef __SSE2__
+#define GROUP_SIZE 16
+#include <emmintrin.h>
+#else
 #define GROUP_SIZE 8
+#endif
 
 uint64_t power_of_two(uint64_t x);
 
 #define calc_ht_size(len, key_size, val_size)                                  \
-    (sizeof(HashTable) + power_of_two(len) * key_size +                        \
-     power_of_two(len) * val_size + power_of_two(len) +                        \
-     (power_of_two(len) % GROUP_SIZE))
+    (sizeof(HashTable) +                                                       \
+     (power_of_two(len) + power_of_two(len) % GROUP_SIZE) * (key_size + 1) +   \
+     (power_of_two(len) + power_of_two(len) % GROUP_SIZE) * val_size)
 
 // For now we utilize this simple hash function.
 uint64_t fnv1a_hash(uint8_t *input, uint64_t length);
