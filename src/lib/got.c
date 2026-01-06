@@ -166,14 +166,39 @@ uint8_t *get_elem_ht(HashTable *ht, uint8_t *key) {
     uint64_t lo = keyhash ^ hi;
     hi >>= 56;
 
-    // TODO: SIMD versions
-    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity; i++) {
-        if (!(hi ^ (control[i] ^ 1))) {
-            if (!memcmp(key, elem + i * elem_size(ht), ht->key_size)) {
-                return elem + i * elem_size(ht) + ht->key_size;
+#ifdef __SSE2__
+    __m128i hiv = _mm_set1_epi8(hi | 1);
+    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity;
+         i += GROUP_SIZE) {
+        __m128i controlv = _mm_loadu_si128((__m128i *)(control + i));
+        int res = _mm_movemask_epi8(_mm_cmpeq_epi8(hiv, controlv));
+        while (res) {
+            uint64_t j = i + __builtin_ctz(res);
+            if (!memcmp(key, elem + j * elem_size(ht), ht->key_size)) {
+                return elem + j * elem_size(ht) + ht->key_size;
             }
+            res &= res - 1;
         }
     }
+
+#else // SWAR
+    uint64_t onev = 0x0101010101010101ull;
+    uint64_t hiv = onev * (hi | 1);
+    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity;
+         i += GROUP_SIZE) {
+        uint64_t controlv = *(uint64_t *)(control + i);
+        uint64_t res = (((hiv ^ controlv) - onev) & ~(hiv ^ controlv)) &
+                       0x8080808080808080ull;
+        while (res) {
+            uint64_t j = i + (__builtin_ctzll(res) >> 3);
+            if (!memcmp(key, elem + j * elem_size(ht), ht->key_size)) {
+                return elem + j * elem_size(ht) + ht->key_size;
+            }
+            res &= res - 1;
+        }
+    }
+
+#endif
 
     return 0;
 }
@@ -187,16 +212,43 @@ uint32_t delete_elem_ht(HashTable *ht, uint8_t *key) {
     uint64_t lo = keyhash ^ hi;
     hi >>= 56;
 
-    // TODO: SIMD versions
-    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity; i++) {
-        if (!(hi ^ (control[i] ^ 1))) {
-            if (!memcmp(key, elem + i * elem_size(ht), ht->key_size)) {
-                control[i] ^= 1;
+#ifdef __SSE2__
+    __m128i hiv = _mm_set1_epi8(hi | 1);
+    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity;
+         i += GROUP_SIZE) {
+        __m128i controlv = _mm_loadu_si128((__m128i *)(control + i));
+        int res = _mm_movemask_epi8(_mm_cmpeq_epi8(hiv, controlv));
+        while (res) {
+            uint64_t j = i + __builtin_ctz(res);
+            if (!memcmp(key, elem + j * elem_size(ht), ht->key_size)) {
+                control[j] ^= 1;
                 ht->length -= 1;
                 return 1;
             }
+            res &= res - 1;
         }
     }
+
+#else // SWAR
+    uint64_t onev = 0x0101010101010101ull;
+    uint64_t hiv = onev * (hi | 1);
+    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity;
+         i += GROUP_SIZE) {
+        uint64_t controlv = *(uint64_t *)(control + i);
+        uint64_t res = (((hiv ^ controlv) - onev) & ~(hiv ^ controlv)) &
+                       0x8080808080808080ull;
+        while (res) {
+            uint64_t j = i + (__builtin_ctzll(res) >> 3);
+            if (!memcmp(key, elem + j * elem_size(ht), ht->key_size)) {
+                control[j] ^= 1;
+                ht->length -= 1;
+                return 1;
+            }
+            res &= res - 1;
+        }
+    }
+
+#endif
 
     return 0;
 }
