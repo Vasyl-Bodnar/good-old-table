@@ -362,12 +362,13 @@
                   (begin
                     (info "Already compiled, skipping " (basename filename))
                     (set! objs (cons (list 'hashed hash obj-filename) objs)))
-                  (set! objs (cons (list 'unfinished filename obj-filename) objs)))
-              #t)))
+                  (set! objs (cons (list 'unfinished filename obj-filename) objs)))))
+
+          #t)
          ((directory) (info "Entering a directory: " (basename filename)))
-         ((invalid-stat) (fail "Could not stat a file: " (basename filename)))
-         ((directory-not-readable) (fail "Directory is not readable: " (basename filename)))
-         ((stale-symlink) (fail "Could not follow a symlink: " (basename filename))))))
+         ((invalid-stat) (warn "Could not stat a file: " (basename filename)))
+         ((directory-not-readable) (warn "Directory is not readable: " (basename filename)))
+         ((stale-symlink) (warn "Could not follow a symlink: " (basename filename))))))
     objs))
 
 (define* (compile-c #:optional (conditional #t) #:key (num-threads #f))
@@ -387,7 +388,7 @@
            (exe-objs '())
            (lib-objs '()))
       (when *executable*
-        (set! exe-objs (collect-objs *source-directory* hashes '()))
+        (set! exe-objs (collect-objs *source-directory* hashes))
         (if num-threads
             (set! exe-objs (n-par-map num-threads handle-compile exe-objs))
             (set! exe-objs (par-map handle-compile exe-objs)))
