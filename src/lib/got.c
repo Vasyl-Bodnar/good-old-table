@@ -24,18 +24,18 @@ uint64_t power_of_two(uint64_t x) {
      (len + (len % GROUP_SIZE)) * val_size)
 
 // Simple hash to use while we don't have a better one
-uint64_t fnv1a_hash(uint8_t *input, uint64_t length) {
+uint64_t fnv1a_hash(uint8_t *input, size_t length) {
     uint64_t init = 12698850840868882907ull;
-    for (uint64_t i = 0; i < length; i++) {
+    for (size_t i = 0; i < length; i++) {
         init ^= input[i];
         init *= 1111111111111111111;
     }
     return init;
 }
 
-HashTable *create_ht(uint8_t *memory, uint64_t len, uint32_t key_size,
-                     uint32_t val_size) {
-    HashTable *ht = (HashTable *)memory;
+HashTable *create_ht(void *memory, size_t len, size_t key_size,
+                     size_t val_size) {
+    HashTable *ht = memory;
     ht->key_size = key_size;
     ht->val_size = val_size;
     ht->length = 0;
@@ -44,13 +44,12 @@ HashTable *create_ht(uint8_t *memory, uint64_t len, uint32_t key_size,
     return ht;
 }
 
-HashTable *create_from_ht(uint8_t *memory, HashTable *old_ht,
-                          uint64_t new_len) {
+HashTable *create_from_ht(void *memory, HashTable *old_ht, size_t new_len) {
     HashTable *new_ht =
         create_ht(memory, new_len, old_ht->key_size, old_ht->val_size);
 
     Entry entry;
-    uint64_t idx = 0;
+    size_t idx = 0;
     while ((entry = next_elem_ht(old_ht, &idx)).key) {
         put_elem_ht(new_ht, entry.key, entry.value);
     }
@@ -60,14 +59,14 @@ HashTable *create_from_ht(uint8_t *memory, HashTable *old_ht,
 
 uint32_t elem_size(HashTable *ht) { return ht->key_size + ht->val_size; }
 
-void copy_elem(HashTable *ht, uint64_t idx, uint8_t *key, uint8_t *value) {
+void copy_elem(HashTable *ht, size_t idx, void *key, void *value) {
     uint8_t *elem = ht->elems + calc_control_size(ht->capacity);
     uint8_t *addr = elem + idx * elem_size(ht);
     memcpy(addr, key, ht->key_size);
     memcpy(addr + ht->key_size, value, ht->val_size);
 }
 
-uint32_t put_elem_ht(HashTable *ht, uint8_t *key, uint8_t *value) {
+uint32_t put_elem_ht(HashTable *ht, void *key, void *value) {
     if (ht->length >= ((ht->capacity * 4) / 5))
         return 0;
 
@@ -82,14 +81,14 @@ uint32_t put_elem_ht(HashTable *ht, uint8_t *key, uint8_t *value) {
 #ifdef __SSE2__
     __m128i onev = _mm_set1_epi8(1);
     __m128i hiv = _mm_set1_epi8(hi | 1);
-    uint64_t potential_i = 0;
+    size_t potential_i = 0;
     int potential_mask = 0;
-    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity;
+    for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
         __m128i controlv = _mm_loadu_si128((__m128i *)(control + i));
         int res = _mm_movemask_epi8(_mm_cmpeq_epi8(hiv, controlv));
         while (res) {
-            uint64_t j = i + __builtin_ctz(res);
+            size_t j = i + __builtin_ctz(res);
             if (!memcmp(key, elem + j * elem_size(ht), ht->key_size)) {
                 memcpy(elem + j * elem_size(ht) + ht->key_size, value,
                        ht->val_size);
@@ -120,15 +119,15 @@ uint32_t put_elem_ht(HashTable *ht, uint8_t *key, uint8_t *value) {
 #else // SWAR
     uint64_t onev = 0x0101010101010101ull;
     uint64_t hiv = onev * (hi | 1);
-    uint64_t potential_i = 0;
+    size_t potential_i = 0;
     uint64_t potential_mask = 0;
-    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity;
+    for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
         uint64_t controlv = *(uint64_t *)(control + i);
         uint64_t res = (((hiv ^ controlv) - onev) & ~(hiv ^ controlv)) &
                        0x8080808080808080ull;
         while (res) {
-            uint64_t j = i + (__builtin_ctzll(res) >> 3);
+            size_t j = i + (__builtin_ctzll(res) >> 3);
             if (!memcmp(key, elem + j * elem_size(ht), ht->key_size)) {
                 memcpy(elem + j * elem_size(ht) + ht->key_size, value,
                        ht->val_size);
@@ -157,7 +156,7 @@ uint32_t put_elem_ht(HashTable *ht, uint8_t *key, uint8_t *value) {
     return 0;
 }
 
-uint8_t *get_elem_ht(HashTable *ht, uint8_t *key) {
+void *get_elem_ht(HashTable *ht, void *key) {
     uint8_t *control = ht->elems;
     uint8_t *elem = ht->elems + calc_control_size(ht->capacity);
 
@@ -168,12 +167,12 @@ uint8_t *get_elem_ht(HashTable *ht, uint8_t *key) {
 
 #ifdef __SSE2__
     __m128i hiv = _mm_set1_epi8(hi | 1);
-    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity;
+    for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
         __m128i controlv = _mm_loadu_si128((__m128i *)(control + i));
         int res = _mm_movemask_epi8(_mm_cmpeq_epi8(hiv, controlv));
         while (res) {
-            uint64_t j = i + __builtin_ctz(res);
+            size_t j = i + __builtin_ctz(res);
             if (!memcmp(key, elem + j * elem_size(ht), ht->key_size)) {
                 return elem + j * elem_size(ht) + ht->key_size;
             }
@@ -184,13 +183,13 @@ uint8_t *get_elem_ht(HashTable *ht, uint8_t *key) {
 #else // SWAR
     uint64_t onev = 0x0101010101010101ull;
     uint64_t hiv = onev * (hi | 1);
-    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity;
+    for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
         uint64_t controlv = *(uint64_t *)(control + i);
         uint64_t res = (((hiv ^ controlv) - onev) & ~(hiv ^ controlv)) &
                        0x8080808080808080ull;
         while (res) {
-            uint64_t j = i + (__builtin_ctzll(res) >> 3);
+            size_t j = i + (__builtin_ctzll(res) >> 3);
             if (!memcmp(key, elem + j * elem_size(ht), ht->key_size)) {
                 return elem + j * elem_size(ht) + ht->key_size;
             }
@@ -203,7 +202,7 @@ uint8_t *get_elem_ht(HashTable *ht, uint8_t *key) {
     return 0;
 }
 
-uint32_t delete_elem_ht(HashTable *ht, uint8_t *key) {
+uint32_t delete_elem_ht(HashTable *ht, void *key) {
     uint8_t *control = ht->elems;
     uint8_t *elem = ht->elems + calc_control_size(ht->capacity);
 
@@ -214,12 +213,12 @@ uint32_t delete_elem_ht(HashTable *ht, uint8_t *key) {
 
 #ifdef __SSE2__
     __m128i hiv = _mm_set1_epi8(hi | 1);
-    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity;
+    for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
         __m128i controlv = _mm_loadu_si128((__m128i *)(control + i));
         int res = _mm_movemask_epi8(_mm_cmpeq_epi8(hiv, controlv));
         while (res) {
-            uint64_t j = i + __builtin_ctz(res);
+            size_t j = i + __builtin_ctz(res);
             if (!memcmp(key, elem + j * elem_size(ht), ht->key_size)) {
                 control[j] ^= 1;
                 ht->length -= 1;
@@ -232,13 +231,13 @@ uint32_t delete_elem_ht(HashTable *ht, uint8_t *key) {
 #else // SWAR
     uint64_t onev = 0x0101010101010101ull;
     uint64_t hiv = onev * (hi | 1);
-    for (uint64_t i = lo & (ht->capacity - 1); i < ht->capacity;
+    for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
         uint64_t controlv = *(uint64_t *)(control + i);
         uint64_t res = (((hiv ^ controlv) - onev) & ~(hiv ^ controlv)) &
                        0x8080808080808080ull;
         while (res) {
-            uint64_t j = i + (__builtin_ctzll(res) >> 3);
+            size_t j = i + (__builtin_ctzll(res) >> 3);
             if (!memcmp(key, elem + j * elem_size(ht), ht->key_size)) {
                 control[j] ^= 1;
                 ht->length -= 1;
@@ -253,16 +252,16 @@ uint32_t delete_elem_ht(HashTable *ht, uint8_t *key) {
     return 0;
 }
 
-Entry next_elem_ht(HashTable *ht, uint64_t *idx) {
+Entry next_elem_ht(HashTable *ht, size_t *idx) {
     if (!idx || *idx >= ht->capacity) {
         return (Entry){0, 0};
     }
 
     uint8_t *control = ht->elems;
-    uint8_t *elem = ht->elems + calc_control_size(ht->capacity);
+    void *elem = ht->elems + calc_control_size(ht->capacity);
 
     // TODO: SIMD versions
-    for (uint64_t i = *idx; i < ht->capacity; i++) {
+    for (size_t i = *idx; i < ht->capacity; i++) {
         if (control[i] & 1) {
             *idx = i + 1;
             return (Entry){
@@ -284,17 +283,17 @@ void clear_ht(HashTable *ht) {
 // Malloc+growth wrappers over non-dynamic variants
 // Potentially allow providing own alloc function
 #ifdef DYNAMIC_TABLE
-DynHashTable *create_dht(uint64_t len, uint32_t key_size, uint32_t val_size) {
-    uint8_t *mem = malloc(calc_ht_size(len, key_size, val_size));
+DynHashTable *create_dht(size_t len, size_t key_size, size_t val_size) {
+    void *mem = malloc(calc_ht_size(len, key_size, val_size));
     return (DynHashTable *)create_ht(mem, len, key_size, val_size);
 }
 
-DynHashTable *realloc_dht(DynHashTable *old_dht, uint64_t new_len) {
+DynHashTable *realloc_dht(DynHashTable *old_dht, size_t new_len) {
     DynHashTable *new_dht =
         create_dht(new_len, old_dht->key_size, old_dht->val_size);
 
     Entry entry;
-    uint64_t idx = 0;
+    size_t idx = 0;
     while ((entry = next_elem_ht((HashTable *)old_dht, &idx)).key) {
         put_elem_ht((HashTable *)new_dht, entry.key, entry.value);
     }
@@ -304,7 +303,7 @@ DynHashTable *realloc_dht(DynHashTable *old_dht, uint64_t new_len) {
     return new_dht;
 }
 
-uint32_t put_elem_dht(DynHashTable **dht, uint8_t *key, uint8_t *value) {
+uint32_t put_elem_dht(DynHashTable **dht, void *key, void *value) {
     uint32_t ret = put_elem_ht((HashTable *)*dht, key, value);
     if (!ret) {
         *dht = realloc_dht(*dht, (*dht)->capacity << 1);
@@ -313,15 +312,15 @@ uint32_t put_elem_dht(DynHashTable **dht, uint8_t *key, uint8_t *value) {
     return ret;
 }
 
-uint8_t *get_elem_dht(DynHashTable *dht, uint8_t *key) {
+void *get_elem_dht(DynHashTable *dht, void *key) {
     return get_elem_ht((HashTable *)dht, key);
 }
 
-uint32_t delete_elem_dht(DynHashTable *dht, uint8_t *key) {
+uint32_t delete_elem_dht(DynHashTable *dht, void *key) {
     return delete_elem_ht((HashTable *)dht, key);
 }
 
-Entry next_elem_dht(DynHashTable *dht, uint64_t *idx) {
+Entry next_elem_dht(DynHashTable *dht, size_t *idx) {
     return next_elem_ht((HashTable *)dht, idx);
 }
 

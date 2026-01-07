@@ -21,19 +21,20 @@
       (compile-c compile?)
 
       (configure #:exe-name "dgot-test"
-                 #:optimization "-O3"
                  #:derive '(DYNAMIC_TABLE))
       (compile-c compile?))
     (begin
       (configure #:lib-name "libgot" #:lib-source-dir "src/lib" #:lib-type 'both
+                 #:include-name "got"
                  #:optimization "-O3")
       (compile-c compile?)
+      (install install?)
 
       (configure #:lib-name "libdgot" #:lib-source-dir "src/lib" #:lib-type 'both
+                 #:include-name "got"
                  #:optimization "-O3"
                  #:derive '(DYNAMIC_TABLE))
-      (compile-c compile?)))
-
-(install install?)
+      (compile-c compile?)
+      (install install?)))
 
 (clean clean?)
