@@ -40,7 +40,7 @@ HashTable *create_ht(void *memory, size_t len, size_t key_size,
     ht->val_size = val_size;
     ht->length = 0;
     ht->capacity = power_of_two(len);
-    memset(ht->elems, 0, calc_control_size(ht->capacity));
+    memset(ht->elems, 0x80, calc_control_size(ht->capacity));
     return ht;
 }
 
@@ -66,6 +66,8 @@ void copy_elem(HashTable *ht, size_t idx, void *key, void *value) {
     memcpy(addr + ht->key_size, value, ht->val_size);
 }
 
+// TODO: Consider some method of wrapping as an optimization?
+// TODO: Our loads are unaligned
 uint32_t put_elem_ht(HashTable *ht, void *key, void *value) {
     if (ht->length >= ((ht->capacity * 4) / 5))
         return 0;
@@ -76,13 +78,11 @@ uint32_t put_elem_ht(HashTable *ht, void *key, void *value) {
     uint64_t keyhash = fnv1a_hash(key, ht->key_size);
     uint64_t hi = keyhash & 0xFE00000000000000ull;
     uint64_t lo = keyhash ^ hi;
-    hi >>= 56;
+    hi >>= 57;
 
 #ifdef __SSE2__
-    __m128i onev = _mm_set1_epi8(1);
-    __m128i hiv = _mm_set1_epi8(hi | 1);
-    size_t potential_i = 0;
-    int potential_mask = 0;
+    __m128i emptyv = _mm_set1_epi8(0x80);
+    __m128i hiv = _mm_set1_epi8(hi);
     for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
         __m128i controlv = _mm_loadu_si128((__m128i *)(control + i));
@@ -97,30 +97,20 @@ uint32_t put_elem_ht(HashTable *ht, void *key, void *value) {
             res &= res - 1;
         }
 
-        if (!potential_mask) {
-            potential_i = i;
-            potential_mask = (~_mm_movemask_epi8(_mm_cmpeq_epi8(
-                                 _mm_and_si128(controlv, onev), onev))) &
-                             0xFFFF;
-        }
-    }
-
-    // Key not found, so if there are free spots we should add a new entry
-    if (potential_mask) {
-        potential_i += __builtin_ctz(potential_mask);
-        if (potential_i < ht->capacity) {
-            control[potential_i] = hi | 1;
-            copy_elem(ht, potential_i, key, value);
+        res = _mm_movemask_epi8(_mm_and_si128(controlv, emptyv));
+        if (res) {
+            size_t j = i + __builtin_ctz(res);
+            control[j] = hi;
+            copy_elem(ht, j, key, value);
             ht->length += 1;
             return 1;
         }
     }
 
 #else // SWAR
+    uint64_t emptyv = 0x8080808080808080ull;
     uint64_t onev = 0x0101010101010101ull;
-    uint64_t hiv = onev * (hi | 1);
-    size_t potential_i = 0;
-    uint64_t potential_mask = 0;
+    uint64_t hiv = onev * hi;
     for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
         uint64_t controlv = *(uint64_t *)(control + i);
@@ -136,21 +126,16 @@ uint32_t put_elem_ht(HashTable *ht, void *key, void *value) {
             res &= res - 1;
         }
 
-        if (!potential_mask) {
-            potential_i = i;
-            potential_mask = (onev & (~controlv)) * 0x80;
-        }
-    }
-
-    if (potential_mask) {
-        potential_i += __builtin_ctzll(potential_mask) >> 3;
-        if (potential_i < ht->capacity) {
-            control[potential_i] = hi | 1;
-            copy_elem(ht, potential_i, key, value);
+        res = controlv & emptyv;
+        if (res) {
+            size_t j = i + __builtin_ctzll(res) >> 3;
+            control[j] = hi;
+            copy_elem(ht, j, key, value);
             ht->length += 1;
             return 1;
         }
     }
+
 #endif
 
     return 0;
@@ -163,10 +148,11 @@ void *get_elem_ht(HashTable *ht, void *key) {
     uint64_t keyhash = fnv1a_hash(key, ht->key_size);
     uint64_t hi = keyhash & 0xFE00000000000000ull;
     uint64_t lo = keyhash ^ hi;
-    hi >>= 56;
+    hi >>= 57;
 
 #ifdef __SSE2__
-    __m128i hiv = _mm_set1_epi8(hi | 1);
+    __m128i emptyv = _mm_set1_epi8(0x80);
+    __m128i hiv = _mm_set1_epi8(hi);
     for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
         __m128i controlv = _mm_loadu_si128((__m128i *)(control + i));
@@ -178,11 +164,16 @@ void *get_elem_ht(HashTable *ht, void *key) {
             }
             res &= res - 1;
         }
+
+        if (_mm_movemask_epi8(_mm_cmpeq_epi8(controlv, emptyv))) {
+            return 0;
+        }
     }
 
 #else // SWAR
+    uint64_t emptyv = 0x8080808080808080ull;
     uint64_t onev = 0x0101010101010101ull;
-    uint64_t hiv = onev * (hi | 1);
+    uint64_t hiv = onev * hi;
     for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
         uint64_t controlv = *(uint64_t *)(control + i);
@@ -194,6 +185,10 @@ void *get_elem_ht(HashTable *ht, void *key) {
                 return elem + j * elem_size(ht) + ht->key_size;
             }
             res &= res - 1;
+        }
+
+        if ((((controlv ^ emptyv) - onev) & ~(controlv ^ emptyv))) {
+            return 0;
         }
     }
 
@@ -209,10 +204,11 @@ uint32_t delete_elem_ht(HashTable *ht, void *key) {
     uint64_t keyhash = fnv1a_hash(key, ht->key_size);
     uint64_t hi = keyhash & 0xFE00000000000000ull;
     uint64_t lo = keyhash ^ hi;
-    hi >>= 56;
+    hi >>= 57;
 
 #ifdef __SSE2__
-    __m128i hiv = _mm_set1_epi8(hi | 1);
+    __m128i emptyv = _mm_set1_epi8(0x80);
+    __m128i hiv = _mm_set1_epi8(hi);
     for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
         __m128i controlv = _mm_loadu_si128((__m128i *)(control + i));
@@ -220,17 +216,22 @@ uint32_t delete_elem_ht(HashTable *ht, void *key) {
         while (res) {
             size_t j = i + __builtin_ctz(res);
             if (!memcmp(key, elem + j * elem_size(ht), ht->key_size)) {
-                control[j] ^= 1;
+                control[j] = 0xFE;
                 ht->length -= 1;
                 return 1;
             }
             res &= res - 1;
         }
+
+        if (_mm_movemask_epi8(_mm_cmpeq_epi8(controlv, emptyv))) {
+            return 0;
+        }
     }
 
 #else // SWAR
+    uint64_t emptyv = 0x8080808080808080ull;
     uint64_t onev = 0x0101010101010101ull;
-    uint64_t hiv = onev * (hi | 1);
+    uint64_t hiv = onev * hi;
     for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
         uint64_t controlv = *(uint64_t *)(control + i);
@@ -239,11 +240,15 @@ uint32_t delete_elem_ht(HashTable *ht, void *key) {
         while (res) {
             size_t j = i + (__builtin_ctzll(res) >> 3);
             if (!memcmp(key, elem + j * elem_size(ht), ht->key_size)) {
-                control[j] ^= 1;
+                control[j] = 0xFE;
                 ht->length -= 1;
                 return 1;
             }
             res &= res - 1;
+        }
+
+        if ((((controlv ^ emptyv) - onev) & ~(controlv ^ emptyv))) {
+            return 0;
         }
     }
 
@@ -262,7 +267,7 @@ Entry next_elem_ht(HashTable *ht, size_t *idx) {
 
     // TODO: SIMD versions
     for (size_t i = *idx; i < ht->capacity; i++) {
-        if (control[i] & 1) {
+        if (!(control[i] & 0x80)) {
             *idx = i + 1;
             return (Entry){
                 elem + i * elem_size(ht),
@@ -277,7 +282,7 @@ Entry next_elem_ht(HashTable *ht, size_t *idx) {
 
 void clear_ht(HashTable *ht) {
     ht->length = 0;
-    memset(ht->elems, 0, calc_control_size(ht->capacity));
+    memset(ht->elems, 0x80, calc_control_size(ht->capacity));
 }
 
 // Malloc+growth wrappers over non-dynamic variants
