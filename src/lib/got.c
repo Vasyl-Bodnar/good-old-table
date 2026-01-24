@@ -3,6 +3,14 @@
    file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "got.h"
 
+#if !(defined(memcpy) && defined(memcmp))
+#include <string.h>
+#endif
+
+#ifndef hash
+#define hash fnv1a_hash
+#endif
+
 uint64_t power_of_two(uint64_t x) {
     if (x <= 1) {
         return 1;
@@ -23,8 +31,7 @@ uint64_t power_of_two(uint64_t x) {
     ((len + (len % GROUP_SIZE)) * (key_size + 1) +                             \
      (len + (len % GROUP_SIZE)) * val_size)
 
-// Simple hash to use while we don't have a better one
-uint64_t fnv1a_hash(uint8_t *input, size_t length) {
+uint64_t fnv1a_hash(const uint8_t *input, const size_t length) {
     uint64_t init = 12698850840868882907ull;
     for (size_t i = 0; i < length; i++) {
         init ^= input[i];
@@ -33,8 +40,8 @@ uint64_t fnv1a_hash(uint8_t *input, size_t length) {
     return init;
 }
 
-HashTable *create_ht(void *memory, size_t len, size_t key_size,
-                     size_t val_size) {
+HashTable *create_ht(void *memory, const size_t len, const size_t key_size,
+                     const size_t val_size) {
     HashTable *ht = memory;
     ht->key_size = key_size;
     ht->val_size = val_size;
@@ -44,7 +51,8 @@ HashTable *create_ht(void *memory, size_t len, size_t key_size,
     return ht;
 }
 
-HashTable *create_from_ht(void *memory, HashTable *old_ht, size_t new_len) {
+HashTable *create_from_ht(void *memory, HashTable *old_ht,
+                          const size_t new_len) {
     HashTable *new_ht =
         create_ht(memory, new_len, old_ht->key_size, old_ht->val_size);
 
@@ -57,9 +65,10 @@ HashTable *create_from_ht(void *memory, HashTable *old_ht, size_t new_len) {
     return new_ht;
 }
 
-uint32_t elem_size(HashTable *ht) { return ht->key_size + ht->val_size; }
+uint32_t elem_size(const HashTable *ht) { return ht->key_size + ht->val_size; }
 
-void copy_elem(HashTable *ht, size_t idx, void *key, void *value) {
+void copy_elem(HashTable *ht, const size_t idx, const void *key,
+               const void *value) {
     uint8_t *elem = ht->elems + calc_control_size(ht->capacity);
     uint8_t *addr = elem + idx * elem_size(ht);
     memcpy(addr, key, ht->key_size);
@@ -68,7 +77,7 @@ void copy_elem(HashTable *ht, size_t idx, void *key, void *value) {
 
 // TODO: Consider some method of wrapping as an optimization?
 // TODO: Our loads are unaligned
-uint32_t put_elem_ht(HashTable *ht, void *key, void *value) {
+uint32_t put_elem_ht(HashTable *ht, const void *key, const void *value) {
     if (ht->length >= ((ht->capacity * 4) / 5))
         return 0;
 
@@ -81,7 +90,7 @@ uint32_t put_elem_ht(HashTable *ht, void *key, void *value) {
     hi >>= 57;
 
 #ifdef __SSE2__
-    __m128i emptyv = _mm_set1_epi8(0x80);
+    const __m128i emptyv = _mm_set1_epi8(0x80);
     __m128i hiv = _mm_set1_epi8(hi);
     for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
@@ -108,8 +117,8 @@ uint32_t put_elem_ht(HashTable *ht, void *key, void *value) {
     }
 
 #else // SWAR
-    uint64_t emptyv = 0x8080808080808080ull;
-    uint64_t onev = 0x0101010101010101ull;
+    const uint64_t emptyv = 0x8080808080808080ull;
+    const uint64_t onev = 0x0101010101010101ull;
     uint64_t hiv = onev * hi;
     for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
@@ -141,7 +150,7 @@ uint32_t put_elem_ht(HashTable *ht, void *key, void *value) {
     return 0;
 }
 
-void *get_elem_ht(HashTable *ht, void *key) {
+void *get_elem_ht(HashTable *ht, const void *key) {
     uint8_t *control = ht->elems;
     uint8_t *elem = ht->elems + calc_control_size(ht->capacity);
 
@@ -151,7 +160,7 @@ void *get_elem_ht(HashTable *ht, void *key) {
     hi >>= 57;
 
 #ifdef __SSE2__
-    __m128i emptyv = _mm_set1_epi8(0x80);
+    const __m128i emptyv = _mm_set1_epi8(0x80);
     __m128i hiv = _mm_set1_epi8(hi);
     for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
@@ -171,8 +180,8 @@ void *get_elem_ht(HashTable *ht, void *key) {
     }
 
 #else // SWAR
-    uint64_t emptyv = 0x8080808080808080ull;
-    uint64_t onev = 0x0101010101010101ull;
+    const uint64_t emptyv = 0x8080808080808080ull;
+    const uint64_t onev = 0x0101010101010101ull;
     uint64_t hiv = onev * hi;
     for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
@@ -197,7 +206,7 @@ void *get_elem_ht(HashTable *ht, void *key) {
     return 0;
 }
 
-uint32_t delete_elem_ht(HashTable *ht, void *key) {
+uint32_t delete_elem_ht(HashTable *ht, const void *key) {
     uint8_t *control = ht->elems;
     uint8_t *elem = ht->elems + calc_control_size(ht->capacity);
 
@@ -207,7 +216,7 @@ uint32_t delete_elem_ht(HashTable *ht, void *key) {
     hi >>= 57;
 
 #ifdef __SSE2__
-    __m128i emptyv = _mm_set1_epi8(0x80);
+    const __m128i emptyv = _mm_set1_epi8(0x80);
     __m128i hiv = _mm_set1_epi8(hi);
     for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
@@ -229,8 +238,8 @@ uint32_t delete_elem_ht(HashTable *ht, void *key) {
     }
 
 #else // SWAR
-    uint64_t emptyv = 0x8080808080808080ull;
-    uint64_t onev = 0x0101010101010101ull;
+    const uint64_t emptyv = 0x8080808080808080ull;
+    const uint64_t onev = 0x0101010101010101ull;
     uint64_t hiv = onev * hi;
     for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
          i += GROUP_SIZE) {
@@ -285,22 +294,28 @@ void clear_ht(HashTable *ht) {
     memset(ht->elems, 0x80, calc_control_size(ht->capacity));
 }
 
-// Malloc+growth wrappers over non-dynamic variants
-// Potentially allow providing own alloc function
 #ifdef DYNAMIC_TABLE
-DynHashTable *create_dht(size_t len, size_t key_size, size_t val_size) {
-    void *mem = malloc(calc_ht_size(len, key_size, val_size));
-    return (DynHashTable *)create_ht(mem, len, key_size, val_size);
+
+#if !(defined(alloc) && defined(dealloc))
+#include <stdlib.h>
+#define alloc malloc
+#define dealloc free
+#endif
+
+HashTable *create_dht(const size_t len, const size_t key_size,
+                      const size_t val_size) {
+    void *mem = alloc(calc_ht_size(len, key_size, val_size));
+    return create_ht(mem, len, key_size, val_size);
 }
 
-DynHashTable *realloc_dht(DynHashTable *old_dht, size_t new_len) {
-    DynHashTable *new_dht =
+HashTable *realloc_dht(HashTable *old_dht, const size_t new_len) {
+    HashTable *new_dht =
         create_dht(new_len, old_dht->key_size, old_dht->val_size);
 
     Entry entry;
     size_t idx = 0;
-    while ((entry = next_elem_ht((HashTable *)old_dht, &idx)).key) {
-        put_elem_ht((HashTable *)new_dht, entry.key, entry.value);
+    while ((entry = next_elem_ht(old_dht, &idx)).key) {
+        put_elem_ht(new_dht, entry.key, entry.value);
     }
 
     free(old_dht);
@@ -308,8 +323,8 @@ DynHashTable *realloc_dht(DynHashTable *old_dht, size_t new_len) {
     return new_dht;
 }
 
-uint32_t put_elem_dht(DynHashTable **dht, void *key, void *value) {
-    uint32_t ret = put_elem_ht((HashTable *)*dht, key, value);
+uint32_t put_elem_dht(HashTable **dht, const void *key, const void *value) {
+    uint32_t ret = put_elem_ht(*dht, key, value);
     if (!ret) {
         *dht = realloc_dht(*dht, (*dht)->capacity << 1);
         return put_elem_dht(dht, key, value);
@@ -317,22 +332,22 @@ uint32_t put_elem_dht(DynHashTable **dht, void *key, void *value) {
     return ret;
 }
 
-void *get_elem_dht(DynHashTable *dht, void *key) {
-    return get_elem_ht((HashTable *)dht, key);
+void *get_elem_dht(HashTable *dht, const void *key) {
+    return get_elem_ht(dht, key);
 }
 
-uint32_t delete_elem_dht(DynHashTable *dht, void *key) {
-    return delete_elem_ht((HashTable *)dht, key);
+uint32_t delete_elem_dht(HashTable *dht, const void *key) {
+    return delete_elem_ht(dht, key);
 }
 
-Entry next_elem_dht(DynHashTable *dht, size_t *idx) {
-    return next_elem_ht((HashTable *)dht, idx);
+Entry next_elem_dht(HashTable *dht, size_t *idx) {
+    return next_elem_ht(dht, idx);
 }
 
-void clear_dht(DynHashTable *dht) {
+void clear_dht(HashTable *dht) {
     dht->length = 0;
     memset(dht->elems, 0, calc_control_size(dht->capacity));
 }
 
-void delete_dht(DynHashTable *dht) { free(dht); }
+void delete_dht(HashTable *dht) { dealloc(dht); }
 #endif // DYNAMIC_TABLE

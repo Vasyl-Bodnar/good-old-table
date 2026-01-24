@@ -84,7 +84,7 @@ int main(void) {
 
 #ifdef DYNAMIC_TABLE
     // Dynamic, much the same, except for all the malloc
-    DynHashTable *dht = create_dht(2, 4, 4);
+    HashTable *dht = create_dht(2, 4, 4);
     ret = put_elem_dht(&dht, "124", "421");
     if (!ret)
         puts("Too full!");

@@ -15,6 +15,8 @@
                                (command-line))))
 (define compile? (not clean?))
 
+(define (test) (status:exit-val (system "./build/dgot-test > tmp.out && diff tmp.out test/base.out && rm tmp.out")))
+
 (if testing?
     (begin
       (configure #:exe-name "got-test")
@@ -22,7 +24,8 @@
 
       (configure #:exe-name "dgot-test"
                  #:derive '(DYNAMIC_TABLE))
-      (compile-c compile?))
+      (compile-c compile?)
+      (let ((t (test))) (if (not (= t 0)) (fail "Got a test error: " (number->string t)) (info "Tested"))))
     (begin
       (configure #:lib-name "libgot" #:lib-source-dir "src/lib" #:lib-type 'both
                  #:include-name "got"

@@ -9,7 +9,7 @@
   #:autoload (ice-9 textual-ports) (get-line get-string-all)
   #:autoload (ice-9 popen) (open-pipe*)
   #:autoload (srfi srfi-1) (delete-duplicates lset<=)
-  #:export (cache configure compile-c install clean disable-default-failure))
+  #:export (cache configure compile-c install clean info warng fail disable-default-failure))
 
 (define *c-compiler* #f)
 (define *c-archiver* #f)
@@ -47,7 +47,7 @@
     (newline))
   #t)
 
-(define (warn . strs)
+(define (warng . strs)
   (when (>= *verbosity* 2)
     (display (apply string-append (cons "WARNING: " strs)))
     (newline))
@@ -181,10 +181,10 @@
           (when sudo
             (if sudo-command
                 (set! *sudo-command* sudo-command)
-                (warn "Could not find a sudo/doas command in PATH, installing might not be possible")))
+                (warng "Could not find a sudo/doas command in PATH, installing might not be possible")))
           (if rmdir-command
               (set! *rmdir-command* rmdir-command)
-              (warn "No rmdir in PATH? Using rm -r"))
+              (warng "No rmdir in PATH? Using rm -r"))
           (unless rm-command
             (fail "No rm in PATH!?"))
           (unless cp-command
@@ -193,7 +193,7 @@
           (set! *executable* (in-vicinity *build-directory* exe-name)))
         (unless (equal? lib-type 'none)
           (when (and (memq lib-type '(static both)) (not (search-path (parse-path (getenv "PATH")) c-archiver)))
-            (warn "Could not find archiver named \"" c-archiver "\" on PATH, cannot do static libraries")
+            (warng "Could not find archiver named \"" c-archiver "\" on PATH, cannot do static libraries")
             (set! *c-archiver* #f))
           (set! *library* (in-vicinity *build-directory* lib-name))
           (set! *library-type* lib-type))
@@ -366,9 +366,9 @@
 
           #t)
          ((directory) (info "Entering a directory: " (basename filename)))
-         ((invalid-stat) (warn "Could not stat a file: " (basename filename)))
-         ((directory-not-readable) (warn "Directory is not readable: " (basename filename)))
-         ((stale-symlink) (warn "Could not follow a symlink: " (basename filename))))))
+         ((invalid-stat) (warng "Could not stat a file: " (basename filename)))
+         ((directory-not-readable) (warng "Directory is not readable: " (basename filename)))
+         ((stale-symlink) (warng "Could not follow a symlink: " (basename filename))))))
     objs))
 
 (define* (compile-c #:optional (conditional #t) #:key (num-threads #f))
