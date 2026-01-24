@@ -25,7 +25,11 @@
       (configure #:exe-name "dgot-test"
                  #:derive '(DYNAMIC_TABLE))
       (compile-c compile?)
-      (let ((t (test))) (if (not (= t 0)) (fail "Got a test error: " (number->string t)) (info "Tested"))))
+
+      (let ((t (test)))
+        (if (not (= t 0))
+            (fail "Got a test error: " (number->string t))
+            (info "Tested"))))
     (begin
       (configure #:lib-name "libgot" #:lib-source-dir "src/lib" #:lib-type 'both
                  #:include-name "got"

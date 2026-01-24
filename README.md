@@ -9,6 +9,9 @@ Base version allows you to provide your own allocated memory for creation or eve
 
 Dynamic version uses malloc wrappers and handles memory for you.
 
+You can also provide your own hash, malloc (alloc), free (dealloc), memcpy, and memcmp using defines. 
+However, the interface would have to remain the same.
+
 ## Usage
 For the base variant that does not manage memory on its own:
 ```c
