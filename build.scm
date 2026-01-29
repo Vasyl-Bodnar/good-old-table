@@ -19,12 +19,14 @@
 
 (if testing?
     (begin
-      (let ((config (configure #:exe-name "got-test")))
+      (let ((config (configure #:exe-name "got-test"
+                               #:cache-keep-configs 4)))
         (compile-c config compile?)
         (clean config clean?))
 
       (let ((config (configure #:exe-name "dgot-test"
-                               #:derive '(DYNAMIC_TABLE))))
+                               #:derive '(DYNAMIC_TABLE)
+                               #:cache-keep-configs 4)))
         (compile-c config compile?)
 
         (when compile?
@@ -35,17 +37,19 @@
 
         (clean config clean?)))
     (begin
-      (let ((config (configure #:lib-name "libgot" #:lib-source-dir "src/lib" #:lib-type 'both
+      (let ((config (configure #:lib-name "libgot" #:lib-src-dir "src/lib" #:lib-type 'both
                                #:include-name "got"
-                               #:optimization "-O3")))
+                               #:optimization "-O3"
+                               #:cache-keep-configs 4)))
         (compile-c config compile?)
         (install config install?)
         (clean config clean?))
 
-      (let ((config (configure #:lib-name "libdgot" #:lib-source-dir "src/lib" #:lib-type 'both
+      (let ((config (configure #:lib-name "libdgot" #:lib-src-dir "src/lib" #:lib-type 'both
                                #:include-name "got"
                                #:optimization "-O3"
-                               #:derive '(DYNAMIC_TABLE))))
+                               #:derive '(DYNAMIC_TABLE)
+                               #:cache-keep-configs 4)))
         (compile-c config compile?)
         (install config install?)
         (clean config clean?))))
