@@ -19,29 +19,33 @@
 
 (if testing?
     (begin
-      (configure #:exe-name "got-test")
-      (compile-c compile?)
+      (let ((config (configure #:exe-name "got-test")))
+        (compile-c config compile?)
+        (clean config clean?))
 
-      (configure #:exe-name "dgot-test"
-                 #:derive '(DYNAMIC_TABLE))
-      (compile-c compile?)
+      (let ((config (configure #:exe-name "dgot-test"
+                               #:derive '(DYNAMIC_TABLE))))
+        (compile-c config compile?)
 
-      (let ((t (test)))
-        (if (not (= t 0))
-            (fail "Got a test error: " (number->string t))
-            (info "Tested"))))
+        (when compile?
+          (let ((t (test)))
+            (if (not (= t 0))
+                (fail config 'a "Got a test error: " (number->string t))
+                (info config "Tested"))))
+
+        (clean config clean?)))
     (begin
-      (configure #:lib-name "libgot" #:lib-source-dir "src/lib" #:lib-type 'both
-                 #:include-name "got"
-                 #:optimization "-O3")
-      (compile-c compile?)
-      (install install?)
+      (let ((config (configure #:lib-name "libgot" #:lib-source-dir "src/lib" #:lib-type 'both
+                               #:include-name "got"
+                               #:optimization "-O3")))
+        (compile-c config compile?)
+        (install config install?)
+        (clean config clean?))
 
-      (configure #:lib-name "libdgot" #:lib-source-dir "src/lib" #:lib-type 'both
-                 #:include-name "got"
-                 #:optimization "-O3"
-                 #:derive '(DYNAMIC_TABLE))
-      (compile-c compile?)
-      (install install?)))
-
-(clean clean?)
+      (let ((config (configure #:lib-name "libdgot" #:lib-source-dir "src/lib" #:lib-type 'both
+                               #:include-name "got"
+                               #:optimization "-O3"
+                               #:derive '(DYNAMIC_TABLE))))
+        (compile-c config compile?)
+        (install config install?)
+        (clean config clean?))))
