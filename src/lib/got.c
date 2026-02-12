@@ -92,9 +92,9 @@ uint32_t put_elem_ht(HashTable *ht, const void *key, const void *value) {
 #ifdef __SSE2__
     const __m128i emptyv = _mm_set1_epi8(0x80);
     __m128i hiv = _mm_set1_epi8(hi);
-    for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
-         i += GROUP_SIZE) {
-        __m128i controlv = _mm_loadu_si128((__m128i *)(control + i));
+    for (size_t i = lo & (ht->capacity - 1) & ~(GROUP_SIZE - 1);
+         i < ht->capacity; i += GROUP_SIZE) {
+        __m128i controlv = _mm_load_si128((__m128i *)(control + i));
         int res = _mm_movemask_epi8(_mm_cmpeq_epi8(hiv, controlv));
         while (res) {
             size_t j = i + __builtin_ctz(res);
@@ -120,8 +120,8 @@ uint32_t put_elem_ht(HashTable *ht, const void *key, const void *value) {
     const uint64_t emptyv = 0x8080808080808080ull;
     const uint64_t onev = 0x0101010101010101ull;
     uint64_t hiv = onev * hi;
-    for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
-         i += GROUP_SIZE) {
+    for (size_t i = lo & (ht->capacity - 1) & ~(GROUP_SIZE - 1);
+         i < ht->capacity; i += GROUP_SIZE) {
         uint64_t controlv = *(uint64_t *)(control + i);
         uint64_t res = (((hiv ^ controlv) - onev) & ~(hiv ^ controlv)) &
                        0x8080808080808080ull;
@@ -162,9 +162,9 @@ void *get_elem_ht(HashTable *ht, const void *key) {
 #ifdef __SSE2__
     const __m128i emptyv = _mm_set1_epi8(0x80);
     __m128i hiv = _mm_set1_epi8(hi);
-    for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
-         i += GROUP_SIZE) {
-        __m128i controlv = _mm_loadu_si128((__m128i *)(control + i));
+    for (size_t i = lo & (ht->capacity - 1) & ~(GROUP_SIZE - 1);
+         i < ht->capacity; i += GROUP_SIZE) {
+        __m128i controlv = _mm_load_si128((__m128i *)(control + i));
         int res = _mm_movemask_epi8(_mm_cmpeq_epi8(hiv, controlv));
         while (res) {
             size_t j = i + __builtin_ctz(res);
@@ -183,8 +183,8 @@ void *get_elem_ht(HashTable *ht, const void *key) {
     const uint64_t emptyv = 0x8080808080808080ull;
     const uint64_t onev = 0x0101010101010101ull;
     uint64_t hiv = onev * hi;
-    for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
-         i += GROUP_SIZE) {
+    for (size_t i = lo & (ht->capacity - 1) & ~(GROUP_SIZE - 1);
+         i < ht->capacity; i += GROUP_SIZE) {
         uint64_t controlv = *(uint64_t *)(control + i);
         uint64_t res = (((hiv ^ controlv) - onev) & ~(hiv ^ controlv)) &
                        0x8080808080808080ull;
@@ -218,9 +218,9 @@ uint32_t delete_elem_ht(HashTable *ht, const void *key) {
 #ifdef __SSE2__
     const __m128i emptyv = _mm_set1_epi8(0x80);
     __m128i hiv = _mm_set1_epi8(hi);
-    for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
-         i += GROUP_SIZE) {
-        __m128i controlv = _mm_loadu_si128((__m128i *)(control + i));
+    for (size_t i = lo & (ht->capacity - 1) & ~(GROUP_SIZE - 1);
+         i < ht->capacity; i += GROUP_SIZE) {
+        __m128i controlv = _mm_load_si128((__m128i *)(control + i));
         int res = _mm_movemask_epi8(_mm_cmpeq_epi8(hiv, controlv));
         while (res) {
             size_t j = i + __builtin_ctz(res);
@@ -241,8 +241,8 @@ uint32_t delete_elem_ht(HashTable *ht, const void *key) {
     const uint64_t emptyv = 0x8080808080808080ull;
     const uint64_t onev = 0x0101010101010101ull;
     uint64_t hiv = onev * hi;
-    for (size_t i = lo & (ht->capacity - 1); i < ht->capacity;
-         i += GROUP_SIZE) {
+    for (size_t i = lo & (ht->capacity - 1) & ~(GROUP_SIZE - 1);
+         i < ht->capacity; i += GROUP_SIZE) {
         uint64_t controlv = *(uint64_t *)(control + i);
         uint64_t res = (((hiv ^ controlv) - onev) & ~(hiv ^ controlv)) &
                        0x8080808080808080ull;

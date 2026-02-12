@@ -6,8 +6,8 @@ New table!
 Did not find any!
 Got a string! 421
 Got a string! 521
-Entry at 10: key: 125 value: 521
-Entry at 25: key: 124 value: 421
+Entry at 1: key: 125 value: 521
+Entry at 17: key: 124 value: 421
 Cleared the old table!
 Did not find any!
 Got a string! 621
